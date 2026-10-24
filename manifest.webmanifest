@@ -1,0 +1,12 @@
+{
+  "name": "東京23区の天気",
+  "short_name": "天気",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#EEF3F8",
+  "theme_color": "#2F7DE1",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" },
+    { "src": "apple-touch-icon.png", "sizes": "180x180", "type": "image/png" }
+  ]
+}

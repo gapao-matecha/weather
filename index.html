@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="東京23区の今日と1週間の天気。気温・体感温度・降水量のグラフと、傘や服装のアドバイス。">
+<meta name="theme-color" content="#EEF3F8" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0F151C" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<title>目黒区の天気</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #eef3f8;
+    --card: #ffffff;
+    --text: #1d2733;
+    --muted: #6b7785;
+    --line: #e2e8ef;
+    --accent: #2f7de1;
+    --warm: #e8603c;
+    --cool: #3b82f6;
+    --rain: #4aa3df;
+    --app: #8b5cf6;
+    --good: #2e9e6a;
+    --warn: #e09a1a;
+    --bad: #d6453d;
+    --shadow: 0 2px 12px rgba(20, 40, 70, .07);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f151c;
+      --card: #18212b;
+      --text: #e6edf3;
+      --muted: #8d99a6;
+      --line: #263240;
+      --accent: #5b9cf0;
+      --shadow: 0 2px 12px rgba(0, 0, 0, .3);
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", "Segoe UI", sans-serif;
+    line-height: 1.5;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+  header h1 { font-size: 1.4rem; margin: 0; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+  header select {
+    font: inherit; font-weight: 700; color: var(--text); background: var(--card);
+    border: 2px solid var(--accent); border-radius: 10px; padding: 2px 8px; cursor: pointer;
+  }
+  header .updated { color: var(--muted); font-size: .85rem; }
+  .card { background: var(--card); border-radius: 16px; box-shadow: var(--shadow); padding: 20px; margin-bottom: 16px; }
+  .card h2 { font-size: 1rem; margin: 0 0 14px; color: var(--muted); font-weight: 600; letter-spacing: .02em; }
+
+  /* hero */
+  .hero { display: grid; grid-template-columns: auto 1fr; gap: 20px; align-items: center; }
+  .hero .icon svg { width: 120px; height: 120px; }
+  .hero .now-temp { font-size: 3.4rem; font-weight: 700; line-height: 1; }
+  .hero .now-temp small { font-size: 1.2rem; color: var(--muted); font-weight: 500; }
+  .hero .desc { font-size: 1.15rem; margin-top: 4px; }
+  .hero .hilo { margin-top: 6px; font-size: 1rem; }
+  .hero .hilo .hi { color: var(--warm); font-weight: 700; }
+  .hero .hilo .lo { color: var(--cool); font-weight: 700; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; margin-top: 18px; }
+  .stat { background: var(--bg); border-radius: 12px; padding: 10px 12px; }
+  .stat .k { font-size: .75rem; color: var(--muted); }
+  .stat .v { font-size: 1.1rem; font-weight: 700; }
+
+  /* summary */
+  .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+  .tip { border-radius: 14px; padding: 14px 16px; border: 1px solid var(--line); display: flex; gap: 12px; align-items: flex-start; }
+  .tip .emoji { font-size: 1.9rem; line-height: 1; }
+  .tip .t { font-weight: 700; font-size: 1.05rem; }
+  .tip .d { color: var(--muted); font-size: .88rem; margin-top: 2px; }
+  .tip.good { border-left: 5px solid var(--good); }
+  .tip.warn { border-left: 5px solid var(--warn); }
+  .tip.bad  { border-left: 5px solid var(--bad); }
+  .tip.info { border-left: 5px solid var(--accent); }
+  .headline { font-size: 1.15rem; font-weight: 700; margin: 0 0 14px; }
+
+  /* hourly strip */
+  .hours { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 8px; scroll-snap-type: x proximity; }
+  .hour { flex: 0 0 64px; text-align: center; padding: 8px 4px; border-radius: 12px; scroll-snap-align: start; }
+  .hour.now { background: var(--bg); outline: 2px solid var(--accent); }
+  .hour.past { opacity: .45; }
+  .hour .h { font-size: .8rem; color: var(--muted); }
+  .hour svg { width: 40px; height: 40px; }
+  .hour .tp { font-weight: 700; }
+  .hour .pp { font-size: .75rem; color: var(--rain); }
+  .chart-box { position: relative; height: 260px; margin-top: 12px; }
+  .chart-box.short { height: 170px; }
+  .chart-title { font-size: .9rem; font-weight: 700; margin: 18px 0 4px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; font-size: .85rem; }
+  .legend .ln { display: inline-block; width: 26px; height: 0; vertical-align: middle; margin-right: 6px; }
+  .legend .ln.temp { border-top: 4px solid var(--warm); }
+  .legend .ln.app { border-top: 3px dashed var(--app); }
+  .legend .ln.bar { height: 10px; border-radius: 2px; background: var(--rain); opacity: .7; }
+  .legend .ln.prob { border-top: 2px solid var(--rain); }
+  .legend .note { color: var(--muted); font-size: .78rem; }
+
+  /* weekly */
+  .days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }
+  .day { text-align: center; padding: 10px 4px; border-radius: 12px; background: var(--bg); }
+  .day.today { outline: 2px solid var(--accent); }
+  .day .dn { font-weight: 700; font-size: .9rem; }
+  .day .dn.sat { color: var(--cool); }
+  .day .dn.sun { color: var(--bad); }
+  .day .dd { font-size: .75rem; color: var(--muted); }
+  .day svg { width: 48px; height: 48px; margin: 4px 0; }
+  .day .dw { font-size: .75rem; min-height: 2.2em; }
+  .day .hl { font-size: .95rem; }
+  .day .hl .hi { color: var(--warm); font-weight: 700; }
+  .day .hl .lo { color: var(--cool); font-weight: 700; }
+  .day .pr { font-size: .75rem; color: var(--rain); margin-top: 2px; }
+  .umb { font-size: .9rem; }
+
+  .loading, .error { text-align: center; padding: 60px 0; color: var(--muted); }
+  .error { color: var(--bad); }
+  footer { text-align: center; color: var(--muted); font-size: .78rem; margin-top: 8px; }
+  footer a { color: inherit; }
+
+  @media (max-width: 720px) {
+    .days { grid-template-columns: repeat(7, minmax(78px, 1fr)); overflow-x: auto; }
+    .hero { grid-template-columns: 1fr; text-align: center; justify-items: center; }
+    .hero .icon svg { width: 100px; height: 100px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>📍 東京都 <select id="ward" aria-label="地域を選択"></select> の天気</h1>
+    <span class="updated" id="updated"></span>
+  </header>
+  <div id="app"><div class="card loading">天気データを読み込み中…</div></div>
+  <footer>データ提供: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>（約10分ごとに自動更新）</footer>
+</div>
+
+<script>
+/* ---------- 地域（東京23区・各区役所付近の座標） ---------- */
+const WARDS = [
+  ['千代田区', 35.6940, 139.7536], ['中央区', 35.6706, 139.7720], ['港区', 35.6581, 139.7516],
+  ['新宿区', 35.6938, 139.7036], ['文京区', 35.7080, 139.7521], ['台東区', 35.7126, 139.7800],
+  ['墨田区', 35.7107, 139.8015], ['江東区', 35.6730, 139.8171], ['品川区', 35.6092, 139.7302],
+  ['目黒区', 35.6414, 139.6982], ['大田区', 35.5613, 139.7160], ['世田谷区', 35.6464, 139.6533],
+  ['渋谷区', 35.6639, 139.6978], ['中野区', 35.7074, 139.6638], ['杉並区', 35.6995, 139.6364],
+  ['豊島区', 35.7263, 139.7166], ['北区', 35.7528, 139.7337], ['荒川区', 35.7362, 139.7834],
+  ['板橋区', 35.7512, 139.7094], ['練馬区', 35.7356, 139.6517], ['足立区', 35.7750, 139.8044],
+  ['葛飾区', 35.7434, 139.8471], ['江戸川区', 35.7067, 139.8683]
+].map(([name, lat, lon]) => ({ name, lat, lon }));
+const DEFAULT_WARD = '目黒区';
+
+// URL(?ward=渋谷区) → 前回の選択 → 目黒区 の順で決める
+function initialWard() {
+  const fromUrl = new URLSearchParams(location.search).get('ward');
+  let saved = null;
+  try { saved = localStorage.getItem('ward'); } catch (e) {}
+  return [fromUrl, saved].find(n => WARDS.some(w => w.name === n)) || DEFAULT_WARD;
+}
+let ward = WARDS.find(w => w.name === initialWard());
+
+function setupWardSelect() {
+  const sel = document.getElementById('ward');
+  sel.innerHTML = WARDS.map(w => `<option ${w === ward ? 'selected' : ''}>${w.name}</option>`).join('');
+  sel.addEventListener('change', () => {
+    ward = WARDS.find(w => w.name === sel.value);
+    try { localStorage.setItem('ward', ward.name); } catch (e) {}
+    const u = new URL(location.href);
+    u.searchParams.set('ward', ward.name);
+    try { history.replaceState(null, '', u); } catch (e) {}
+    document.getElementById('app').innerHTML = `<div class="card loading">${ward.name}の天気を読み込み中…</div>`;
+    refresh();
+  });
+}
+
+/* ---------- 天気コード ---------- */
+const WMO = {
+  0: ['快晴', 'clear'], 1: ['晴れ', 'clear'], 2: ['晴れ時々くもり', 'partly'], 3: ['くもり', 'cloudy'],
+  45: ['霧', 'fog'], 48: ['霧', 'fog'],
+  51: ['霧雨', 'drizzle'], 53: ['霧雨', 'drizzle'], 55: ['霧雨', 'drizzle'], 56: ['着氷性の霧雨', 'drizzle'], 57: ['着氷性の霧雨', 'drizzle'],
+  61: ['小雨', 'rain'], 63: ['雨', 'rain'], 65: ['強い雨', 'heavyrain'], 66: ['着氷性の雨', 'rain'], 67: ['着氷性の雨', 'heavyrain'],
+  71: ['小雪', 'snow'], 73: ['雪', 'snow'], 75: ['大雪', 'snow'], 77: ['霧雪', 'snow'],
+  80: ['にわか雨', 'showers'], 81: ['にわか雨', 'showers'], 82: ['激しいにわか雨', 'heavyrain'],
+  85: ['にわか雪', 'snow'], 86: ['激しいにわか雪', 'snow'],
+  95: ['雷雨', 'thunder'], 96: ['雷雨（ひょう）', 'thunder'], 99: ['激しい雷雨', 'thunder']
+};
+const wDesc = c => (WMO[c] || ['不明'])[0];
+const wKind = c => (WMO[c] || [, 'cloudy'])[1];
+
+/* ---------- イラスト(SVG) ---------- */
+const SUN = (x = 32, y = 32, r = 11) => {
+  let rays = '';
+  for (let i = 0; i < 8; i++) {
+    const a = i * Math.PI / 4;
+    rays += `<line x1="${x + Math.cos(a) * (r + 4)}" y1="${y + Math.sin(a) * (r + 4)}" x2="${x + Math.cos(a) * (r + 9)}" y2="${y + Math.sin(a) * (r + 9)}" stroke="#f7b500" stroke-width="3.5" stroke-linecap="round"/>`;
+  }
+  return `<g>${rays}<circle cx="${x}" cy="${y}" r="${r}" fill="#ffc83d" stroke="#f7a400" stroke-width="2"/></g>`;
+};
+const MOON = (x = 32, y = 30) =>
+  `<path d="M${x + 6} ${y - 14} a14 14 0 1 0 10 22 a11 11 0 1 1 -10 -22z" fill="#ffe27a" stroke="#e5be3c" stroke-width="2"/>`;
+const CLOUD = (dx = 0, dy = 0, fill = '#dfe6ee', stroke = '#9aa8b8') =>
+  `<path transform="translate(${dx} ${dy})" d="M18 46 h28 a10 10 0 0 0 0-20 a14 14 0 0 0-26-4 a10 10 0 0 0-2 24z" fill="${fill}" stroke="${stroke}" stroke-width="2" stroke-linejoin="round"/>`;
+const DROPS = (n = 3, color = '#3d9be0') => {
+  const xs = n === 2 ? [26, 38] : n === 4 ? [20, 29, 38, 47] : [22, 32, 42];
+  return xs.map((x, i) => `<line x1="${x}" y1="${51 + (i % 2) * 3}" x2="${x - 3}" y2="${58 + (i % 2) * 3}" stroke="${color}" stroke-width="3" stroke-linecap="round"/>`).join('');
+};
+function icon(code, isDay = true) {
+  const k = wKind(code);
+  const sky = isDay ? SUN : MOON;
+  let s;
+  switch (k) {
+    case 'clear':   s = isDay ? SUN(32, 32, 13) : MOON(30, 32); break;
+    case 'partly':  s = (isDay ? SUN(24, 22, 9) : MOON(22, 20)) + CLOUD(4, 4); break;
+    case 'cloudy':  s = CLOUD(-8, -6, '#c9d3de', '#8392a3') + CLOUD(4, 2); break;
+    case 'fog':     s = CLOUD(0, -6) + [46, 52, 58].map(y => `<line x1="14" y1="${y}" x2="50" y2="${y}" stroke="#9aa8b8" stroke-width="3" stroke-linecap="round"/>`).join(''); break;
+    case 'drizzle': s = CLOUD(0, -6) + DROPS(2, '#6fb6e8'); break;
+    case 'rain':    s = CLOUD(0, -6, '#c3ccd7', '#7d8b9c') + DROPS(3); break;
+    case 'heavyrain': s = CLOUD(0, -6, '#9ba8b7', '#5f6d7d') + DROPS(4, '#1f7fd1'); break;
+    case 'showers': s = (isDay ? SUN(22, 18, 8) : MOON(20, 16)) + CLOUD(2, -4) + DROPS(2); break;
+    case 'snow':    s = CLOUD(0, -6) + [[22, 54], [32, 58], [42, 54]].map(([x, y]) => `<text x="${x}" y="${y + 4}" font-size="11" text-anchor="middle" fill="#7cc4f2">❄</text>`).join(''); break;
+    case 'thunder': s = CLOUD(0, -6, '#8e9aa9', '#56616f') + `<path d="M34 42 l-7 11 h6 l-4 10 l11-14 h-6 l4-7z" fill="#ffcc1a" stroke="#e0a800" stroke-width="1.5" stroke-linejoin="round"/>`; break;
+    default:        s = CLOUD();
+  }
+  return `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="${wDesc(code)}">${s}</svg>`;
+}
+
+/* ---------- ユーティリティ ---------- */
+const DOW = ['日', '月', '火', '水', '木', '金', '土'];
+const r1 = v => Math.round(v * 10) / 10;
+const r0 = v => Math.round(v);
+const pad = n => String(n).padStart(2, '0');
+function todayStr() {
+  const d = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }));
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+
+/* ---------- サマリ生成 ---------- */
+function feel(max, min, appMax) {
+  const t = (max * 2 + min) / 3;
+  if (t <= 5)  return { emoji: '🥶', t: 'とても寒い', d: 'ダウンやマフラー、手袋で防寒をしっかり。', cls: 'bad' };
+  if (t <= 11) return { emoji: '🧥', t: '寒い', d: 'コートやセーターなど冬物がおすすめ。', cls: 'warn' };
+  if (t <= 16) return { emoji: '🧣', t: '肌寒い', d: '薄手のコートやジャケットを羽織って。', cls: 'info' };
+  if (t <= 21) return { emoji: '👕', t: '過ごしやすい', d: '長袖シャツやカーディガンでちょうど良さそう。', cls: 'good' };
+  if (t <= 26) return { emoji: '🌤️', t: '暖かい', d: '半袖〜薄手の長袖で快適。', cls: 'good' };
+  if (t <= 31) return { emoji: '🥵', t: '暑い', d: '半袖で。こまめな水分補給を。', cls: 'warn' };
+  return { emoji: '🔥', t: '猛暑', d: '熱中症に厳重警戒。外出は涼しい時間帯に。', cls: 'bad' };
+}
+
+function umbrella(hours) {
+  // 外出しそうな 7〜22 時を対象
+  const active = hours.filter(h => h.hour >= 7 && h.hour <= 22);
+  const maxProb = Math.max(...active.map(h => h.prob ?? 0));
+  const sum = active.reduce((a, h) => a + (h.precip || 0), 0);
+  const rainy = active.filter(h => (h.prob ?? 0) >= 50 || h.precip >= 0.5);
+  const span = rainy.length ? `${rainy[0].hour}時〜${rainy[rainy.length - 1].hour + 1}時ごろ` : '';
+  if (maxProb >= 60 || sum >= 2)
+    return { emoji: '☂️', t: '傘を持って出かけよう', d: `降水確率 最大${maxProb}%・日中の降水量 ${r1(sum)}mm。${span ? span + 'に雨の予想。' : ''}`, cls: 'bad', need: 2 };
+  if (maxProb >= 30 || sum >= 0.3)
+    return { emoji: '🌂', t: '折りたたみ傘があると安心', d: `降水確率 最大${maxProb}%。${span ? span + 'に降るかも。' : 'にわか雨の可能性あり。'}`, cls: 'warn', need: 1 };
+  return { emoji: '😎', t: '傘はいらなそう', d: `日中の降水確率は最大${maxProb}%。`, cls: 'good', need: 0 };
+}
+
+function buildTips(today, yest, hours, current) {
+  const tips = [];
+  const f = feel(today.max, today.min, today.appMax);
+  tips.push(f);
+  const u = umbrella(hours);
+  tips.push(u);
+
+  if (yest) {
+    const diff = r1(today.max - yest.max);
+    if (Math.abs(diff) >= 1) {
+      tips.push({
+        emoji: diff > 0 ? '📈' : '📉',
+        t: `昨日より${Math.abs(diff)}℃${diff > 0 ? '高い' : '低い'}`,
+        d: `昨日の最高 ${r0(yest.max)}℃ → 今日 ${r0(today.max)}℃。${diff <= -3 ? '体感でもはっきり寒く感じそう。' : diff >= 3 ? '昨日より薄着でもOK。' : ''}`,
+        cls: 'info'
+      });
+    } else {
+      tips.push({ emoji: '➖', t: '昨日とほぼ同じ気温', d: `昨日の最高 ${r0(yest.max)}℃ / 今日 ${r0(today.max)}℃。`, cls: 'info' });
+    }
+  }
+  const range = today.max - today.min;
+  if (range >= 9) {
+    tips.push({ emoji: '🌡️', t: `寒暖差 ${r0(range)}℃ に注意`, d: '朝晩は冷えます。脱ぎ着しやすい服装で。', cls: 'warn' });
+  }
+  if (today.uv >= 6) {
+    tips.push({ emoji: '🧴', t: `紫外線が強い（UV ${r1(today.uv)}）`, d: '日焼け止め・帽子・サングラスを。', cls: 'warn' });
+  } else if (today.uv >= 3) {
+    tips.push({ emoji: '🧢', t: `紫外線はほどほど（UV ${r1(today.uv)}）`, d: '長時間の外出なら日焼け止めを。', cls: 'info' });
+  }
+  if (today.wind >= 30) {
+    tips.push({ emoji: '💨', t: '風が強い', d: `最大風速 ${r0(today.wind / 3.6)}m/s。傘が煽られるかも。`, cls: 'warn' });
+  }
+  const headline = `今日は${f.t}一日。${u.need === 2 ? '傘を忘れずに！' : u.need === 1 ? '念のため折りたたみ傘を。' : '傘は不要です。'}`;
+  return { tips, headline };
+}
+
+/* ---------- 描画 ---------- */
+let charts = [];
+async function load() {
+  const url = 'https://api.open-meteo.com/v1/forecast?' + new URLSearchParams({
+    latitude: ward.lat, longitude: ward.lon, timezone: 'Asia/Tokyo', forecast_days: 7, past_days: 1,
+    current: 'temperature_2m,apparent_temperature,weather_code,relative_humidity_2m,wind_speed_10m,precipitation,is_day',
+    hourly: 'temperature_2m,apparent_temperature,precipitation,precipitation_probability,weather_code,is_day',
+    daily: 'weather_code,temperature_2m_max,temperature_2m_min,apparent_temperature_max,precipitation_sum,precipitation_probability_max,uv_index_max,wind_speed_10m_max,sunrise,sunset'
+  });
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return res.json();
+}
+
+function render(data) {
+  const app = document.getElementById('app');
+  const tStr = todayStr();
+  const D = data.daily, H = data.hourly, C = data.current;
+  const ti = D.time.indexOf(tStr);
+  const yi = ti - 1;
+  const day = i => ({
+    date: D.time[i], code: D.weather_code[i], max: D.temperature_2m_max[i], min: D.temperature_2m_min[i],
+    appMax: D.apparent_temperature_max[i], precip: D.precipitation_sum[i], prob: D.precipitation_probability_max[i],
+    uv: D.uv_index_max[i], wind: D.wind_speed_10m_max[i], sunrise: D.sunrise[i], sunset: D.sunset[i]
+  });
+  const today = day(ti);
+  const yest = yi >= 0 ? day(yi) : null;
+
+  const hours = [];
+  H.time.forEach((t, i) => {
+    if (t.startsWith(tStr)) hours.push({
+      hour: +t.slice(11, 13), temp: H.temperature_2m[i], app: H.apparent_temperature[i],
+      precip: H.precipitation[i], prob: H.precipitation_probability[i], code: H.weather_code[i], isDay: !!H.is_day[i]
+    });
+  });
+  const nowHour = +C.time.slice(11, 13);
+  const { tips, headline } = buildTips(today, yest, hours, C);
+
+  const week = [];
+  for (let i = ti; i < D.time.length && week.length < 7; i++) week.push(day(i));
+
+  app.innerHTML = `
+    <section class="card">
+      <div class="hero">
+        <div class="icon">${icon(C.weather_code, !!C.is_day)}</div>
+        <div>
+          <div class="now-temp">${r1(C.temperature_2m)}<small>℃ 現在</small></div>
+          <div class="desc">${wDesc(C.weather_code)}　<span style="color:var(--muted)">体感 ${r1(C.apparent_temperature)}℃</span></div>
+          <div class="hilo">今日の最高 <span class="hi">${r0(today.max)}℃</span> / 最低 <span class="lo">${r0(today.min)}℃</span></div>
+        </div>
+      </div>
+      <div class="stats">
+        <div class="stat"><div class="k">降水確率</div><div class="v">${today.prob ?? '-'}%</div></div>
+        <div class="stat"><div class="k">降水量（1日）</div><div class="v">${r1(today.precip)} mm</div></div>
+        <div class="stat"><div class="k">湿度</div><div class="v">${C.relative_humidity_2m}%</div></div>
+        <div class="stat"><div class="k">風速</div><div class="v">${r1(C.wind_speed_10m / 3.6)} m/s</div></div>
+        <div class="stat"><div class="k">UV指数</div><div class="v">${r1(today.uv)}</div></div>
+        <div class="stat"><div class="k">日の出 / 日の入</div><div class="v">${today.sunrise.slice(11)} / ${today.sunset.slice(11)}</div></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>今日のポイント</h2>
+      <p class="headline">${headline}</p>
+      <div class="summary">
+        ${tips.map(t => `<div class="tip ${t.cls}"><div class="emoji">${t.emoji}</div><div><div class="t">${t.t}</div><div class="d">${t.d}</div></div></div>`).join('')}
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>今日の1時間ごとの天気</h2>
+      <div class="hours" id="hours">
+        ${hours.map(h => `
+          <div class="hour ${h.hour === nowHour ? 'now' : h.hour < nowHour ? 'past' : ''}">
+            <div class="h">${h.hour === nowHour ? '今' : h.hour + '時'}</div>
+            ${icon(h.code, h.isDay)}
+            <div class="tp">${r0(h.temp)}°</div>
+            <div class="pp">💧${h.prob ?? 0}%</div>
+          </div>`).join('')}
+      </div>
+      <div class="chart-title">🌡️ 気温と体感温度</div>
+      <div class="legend">
+        <span><i class="ln temp"></i>気温</span>
+        <span><i class="ln app"></i>体感温度</span>
+        <span class="note">体感温度＝風や湿度を考慮した、肌で感じる温度</span>
+      </div>
+      <div class="chart-box"><canvas id="hourChart"></canvas></div>
+      <div class="chart-title">☔ 雨</div>
+      <div class="legend">
+        <span><i class="ln bar"></i>降水量 (mm)</span>
+        <span><i class="ln prob"></i>降水確率 (%)</span>
+      </div>
+      <div class="chart-box short"><canvas id="rainChart"></canvas></div>
+    </section>
+
+    <section class="card">
+      <h2>週間天気</h2>
+      <div class="days">
+        ${week.map((d, i) => {
+          const w = new Date(d.date + 'T12:00:00Z').getUTCDay();
+          const cls = w === 0 ? 'sun' : w === 6 ? 'sat' : '';
+          return `<div class="day ${i === 0 ? 'today' : ''}">
+            <div class="dn ${cls}">${i === 0 ? '今日' : i === 1 ? '明日' : DOW[w]}</div>
+            <div class="dd">${+d.date.slice(5, 7)}/${+d.date.slice(8)}（${DOW[w]}）</div>
+            ${icon(d.code)}
+            <div class="dw">${wDesc(d.code)}</div>
+            <div class="hl"><span class="hi">${r0(d.max)}°</span> / <span class="lo">${r0(d.min)}°</span></div>
+            <div class="pr">💧${d.prob ?? '-'}% ・ ${r1(d.precip)}mm</div>
+            <div class="umb">${(d.prob ?? 0) >= 60 || d.precip >= 2 ? '☂️' : (d.prob ?? 0) >= 30 ? '🌂' : ''}</div>
+          </div>`;
+        }).join('')}
+      </div>
+      <div class="chart-box"><canvas id="weekChart"></canvas></div>
+    </section>
+  `;
+
+  // 現在時刻へスクロール
+  const strip = document.getElementById('hours');
+  const nowEl = strip.querySelector('.now');
+  if (nowEl) strip.scrollLeft = Math.max(0, nowEl.offsetLeft - strip.offsetLeft - 70);
+
+  drawCharts(hours, week, nowHour);
+  document.getElementById('updated').textContent =
+    `${+tStr.slice(5, 7)}月${+tStr.slice(8)}日（${DOW[new Date(tStr + 'T12:00:00Z').getUTCDay()]}） ${C.time.slice(11)} 時点`;
+}
+
+function drawCharts(hours, week, nowHour) {
+  charts.forEach(c => c.destroy());
+  charts = [];
+  const text = cssVar('--muted'), grid = cssVar('--line');
+  const warm = cssVar('--warm'), cool = cssVar('--cool'), rain = cssVar('--rain'), appC = cssVar('--app');
+  Chart.defaults.color = text;
+  Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+
+  const nowLine = {
+    id: 'nowLine',
+    afterDraw(chart) {
+      const idx = hours.findIndex(h => h.hour === nowHour);
+      if (idx < 0) return;
+      const x = chart.scales.x.getPixelForValue(idx);
+      const { top, bottom } = chart.chartArea;
+      const ctx = chart.ctx;
+      ctx.save();
+      ctx.strokeStyle = cssVar('--accent');
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, bottom); ctx.stroke();
+      ctx.fillStyle = cssVar('--accent');
+      ctx.font = 'bold 11px sans-serif';
+      ctx.fillText('現在', x + 4, top + 12);
+      ctx.restore();
+    }
+  };
+
+  const maxPH = Math.max(2, ...hours.map(h => h.precip));
+  const maxPW = Math.max(5, ...week.map(d => d.precip));
+
+  // 3時間おきに気温の数値をグラフ上に表示
+  const tempLabels = {
+    id: 'tempLabels',
+    afterDatasetsDraw(chart) {
+      const meta = chart.getDatasetMeta(0);
+      const ctx = chart.ctx;
+      ctx.save();
+      ctx.font = 'bold 11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = warm;
+      meta.data.forEach((pt, i) => {
+        if (hours[i].hour % 3 !== 0) return;
+        const above = hours[i].temp >= hours[i].app;
+        ctx.fillText(r0(hours[i].temp) + '°', pt.x, pt.y + (above ? -8 : 16));
+      });
+      ctx.restore();
+    }
+  };
+  // 目盛りが細かすぎると小さな差が大きく見えるので、最低でも8℃幅で表示
+  const allT = hours.flatMap(h => [h.temp, h.app]);
+  const tMid = (Math.max(...allT) + Math.min(...allT)) / 2;
+  const tHalf = Math.max(4, (Math.max(...allT) - Math.min(...allT)) / 2 + 1.5);
+  const xOpts = { grid: { color: grid }, ticks: { maxRotation: 0, autoSkip: true, autoSkipPadding: 8 } };
+  charts.push(new Chart(document.getElementById('hourChart'), {
+    type: 'line',
+    data: {
+      labels: hours.map(h => h.hour + '時'),
+      datasets: [
+        { label: '気温', data: hours.map(h => h.temp), borderColor: warm, backgroundColor: warm, borderWidth: 3.5, tension: .35, pointRadius: 0, pointHoverRadius: 5 },
+        { label: '体感温度', data: hours.map(h => h.app), borderColor: appC, backgroundColor: appC + '22', borderWidth: 2.5, borderDash: [6, 4], tension: .35, pointRadius: 0, pointHoverRadius: 5, fill: '-1' }
+      ]
+    },
+    options: {
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      layout: { padding: { top: 14 } },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: c => ` ${c.dataset.label}: ${r1(c.parsed.y)}℃`,
+            footer: items => {
+              const d = r1(hours[items[0].dataIndex].app - hours[items[0].dataIndex].temp);
+              return Math.abs(d) < 0.5 ? '体感は気温とほぼ同じ' : `体感は気温より ${Math.abs(d)}℃ ${d < 0 ? '低い' : '高い'}`;
+            }
+          }
+        }
+      },
+      scales: {
+        x: xOpts,
+        y: { min: Math.floor((tMid - tHalf) / 2) * 2, max: Math.ceil((tMid + tHalf) / 2) * 2, grid: { color: grid }, ticks: { stepSize: tHalf > 6 ? 4 : 2, callback: v => v + '°' } }
+      }
+    },
+    plugins: [nowLine, tempLabels]
+  }));
+
+  charts.push(new Chart(document.getElementById('rainChart'), {
+    data: {
+      labels: hours.map(h => h.hour + '時'),
+      datasets: [
+        { type: 'bar', label: '降水量', data: hours.map(h => h.precip), backgroundColor: rain + 'aa', borderRadius: 3, yAxisID: 'y' },
+        { type: 'line', label: '降水確率', data: hours.map(h => h.prob), borderColor: rain, borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, stepped: 'middle', yAxisID: 'y1' }
+      ]
+    },
+    options: {
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: c => ` ${c.dataset.label}: ${c.dataset.type === 'bar' ? r1(c.parsed.y) + 'mm' : c.parsed.y + '%'}` } }
+      },
+      scales: {
+        x: xOpts,
+        y: { min: 0, suggestedMax: maxPH, grid: { color: grid }, ticks: { maxTicksLimit: 4, callback: v => v + 'mm' } },
+        y1: { position: 'right', min: 0, max: 100, grid: { display: false }, ticks: { stepSize: 50, callback: v => v + '%' } }
+      }
+    },
+    plugins: [nowLine]
+  }));
+
+  charts.push(new Chart(document.getElementById('weekChart'), {
+    data: {
+      labels: week.map((d, i) => i === 0 ? '今日' : `${+d.date.slice(5, 7)}/${+d.date.slice(8)}`),
+      datasets: [
+        { type: 'line', label: '最高 (℃)', data: week.map(d => d.max), borderColor: warm, backgroundColor: warm, tension: .3, pointRadius: 4, yAxisID: 'y' },
+        { type: 'line', label: '最低 (℃)', data: week.map(d => d.min), borderColor: cool, backgroundColor: cool, tension: .3, pointRadius: 4, yAxisID: 'y' },
+        { type: 'bar', label: '降水量 (mm)', data: week.map(d => d.precip), backgroundColor: rain + 'aa', borderRadius: 4, yAxisID: 'y1' }
+      ]
+    },
+    options: {
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { labels: { boxWidth: 12, usePointStyle: true } } },
+      scales: {
+        x: { grid: { color: grid } },
+        y: { position: 'left', grid: { color: grid }, ticks: { callback: v => v + '°' }, grace: 2 },
+        y1: { position: 'right', min: 0, suggestedMax: maxPW, grid: { display: false }, ticks: { callback: v => v + 'mm' } }
+      }
+    }
+  }));
+}
+
+let reqId = 0;
+async function refresh() {
+  const id = ++reqId; // 区を素早く切り替えたとき、古い応答で上書きしない
+  document.title = `${ward.name}の天気`;
+  try {
+    const data = await load();
+    if (id === reqId) render(data);
+  } catch (e) {
+    console.error(e);
+    if (id === reqId && !document.querySelector('.hero'))
+      document.getElementById('app').innerHTML = `<div class="card error">天気データを取得できませんでした（${e.message}）。時間をおいて再読み込みしてください。</div>`;
+  }
+}
+setupWardSelect();
+refresh();
+setInterval(refresh, 10 * 60 * 1000);
+</script>
+</body>
+</html>
