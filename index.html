@@ -9,7 +9,7 @@
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="manifest" href="manifest.webmanifest">
-<title>目黒区の天気</title>
+<title>東京都の天気</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
   :root {
@@ -564,7 +564,7 @@ function drawCharts(hours, week, nowHour) {
 let reqId = 0;
 async function refresh() {
   const id = ++reqId; // 区を素早く切り替えたとき、古い応答で上書きしない
-  document.title = `${ward.name}の天気`;
+  document.title = `東京都の天気（${ward.name}）`;
   try {
     const data = await load();
     if (id === reqId) render(data);

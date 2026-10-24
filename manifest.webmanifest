@@ -1,5 +1,5 @@
 {
-  "name": "東京23区の天気",
+  "name": "東京都の天気",
   "short_name": "天気",
   "start_url": "./",
   "display": "standalone",
