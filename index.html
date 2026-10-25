@@ -87,7 +87,7 @@
   /* hourly strip */
   .hours { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 8px; scroll-snap-type: x proximity; }
   .hour { flex: 0 0 64px; text-align: center; padding: 8px 4px; border-radius: 12px; scroll-snap-align: start; }
-  .hour.now { background: var(--bg); outline: 2px solid var(--accent); }
+  .hour.now { background: var(--bg); outline: 2px solid var(--accent); outline-offset: -2px; }
   .hour.past { opacity: .45; }
   .hour .h { font-size: .8rem; color: var(--muted); }
   .hour svg { width: 40px; height: 40px; }
@@ -107,7 +107,7 @@
   /* weekly */
   .days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }
   .day { text-align: center; padding: 10px 4px; border-radius: 12px; background: var(--bg); }
-  .day.today { outline: 2px solid var(--accent); }
+  .day.today { outline: 2px solid var(--accent); outline-offset: -2px; }
   .day .dn { font-weight: 700; font-size: .9rem; }
   .day .dn.sat { color: var(--cool); }
   .day .dn.sun { color: var(--bad); }
@@ -481,6 +481,7 @@ function drawCharts(hours, week, nowHour) {
   const allT = hours.flatMap(h => [h.temp, h.app]);
   const tMid = (Math.max(...allT) + Math.min(...allT)) / 2;
   const tHalf = Math.max(4, (Math.max(...allT) - Math.min(...allT)) / 2 + 1.5);
+  const tStep = tHalf > 6 ? 4 : 2;
   const xOpts = { grid: { color: grid }, ticks: { maxRotation: 0, autoSkip: true, autoSkipPadding: 8 } };
   charts.push(new Chart(document.getElementById('hourChart'), {
     type: 'line',
@@ -509,7 +510,7 @@ function drawCharts(hours, week, nowHour) {
       },
       scales: {
         x: xOpts,
-        y: { min: Math.floor((tMid - tHalf) / 2) * 2, max: Math.ceil((tMid + tHalf) / 2) * 2, grid: { color: grid }, ticks: { stepSize: tHalf > 6 ? 4 : 2, callback: v => v + '°' } }
+        y: { min: Math.floor((tMid - tHalf) / tStep) * tStep, max: Math.ceil((tMid + tHalf) / tStep) * tStep, grid: { color: grid }, ticks: { stepSize: tStep, callback: v => v + '°' } }
       }
     },
     plugins: [nowLine, tempLabels]
