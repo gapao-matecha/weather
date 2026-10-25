@@ -511,7 +511,7 @@ function drawCharts(hours, week, nowHour) {
   const every3h = i => hours[i] && hours[i].hour % 3 === 0;
   const xOpts = {
     offset: true, // 棒グラフと折れ線で時刻の位置を一致させる
-    grid: { color: c => every3h(c.index) ? grid : 'transparent' },
+    grid: { offset: false, color: c => every3h(c.index) ? grid : 'transparent' }, // 棒グラフでも線を時刻の真上に
     ticks: { maxRotation: 0, autoSkip: false, callback: (v, i) => every3h(i) ? hours[i].hour + '時' : '' }
   };
   const AXIS_W = 46;
