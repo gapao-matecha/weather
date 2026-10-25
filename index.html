@@ -10,6 +10,9 @@
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="manifest" href="manifest.webmanifest">
 <title>東京都の天気</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
   :root {
@@ -49,7 +52,7 @@
     margin: 0;
     background: var(--bg);
     color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", "Segoe UI", sans-serif;
+    font-family: "Noto Sans JP", "Hiragino Sans", "Hiragino Kaku Gothic ProN", sans-serif;
     line-height: 1.5;
   }
   .wrap { max-width: 1080px; margin: 0 auto; padding: 24px 16px 48px; }
@@ -182,7 +185,7 @@
   .dm-sub .hi { color: var(--warm); font-weight: 700; }
   .dm-sub .lo { color: var(--cool); font-weight: 700; }
   .dm-btn {
-    width: 38px; height: 38px; border-radius: 999px; border: 1px solid var(--line);
+    font: inherit; width: 38px; height: 38px; border-radius: 999px; border: 1px solid var(--line);
     background: var(--card); color: var(--text); font-size: 1.25rem; line-height: 1;
     display: grid; place-items: center; cursor: pointer; transition: background-color .12s;
   }
@@ -535,7 +538,7 @@ function drawHourly(hours, nowHour, key) {
       ctx.setLineDash([4, 4]);
       ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, bottom); ctx.stroke();
       ctx.fillStyle = cssVar('--accent');
-      ctx.font = 'bold 11px sans-serif';
+      ctx.font = `bold 11px ${Chart.defaults.font.family}`;
       ctx.fillText('現在', x + 4, top + 12);
       ctx.restore();
     }
@@ -549,7 +552,7 @@ function drawHourly(hours, nowHour, key) {
       const meta = chart.getDatasetMeta(0);
       const ctx = chart.ctx;
       ctx.save();
-      ctx.font = 'bold 11px sans-serif';
+      ctx.font = `bold 11px ${Chart.defaults.font.family}`;
       ctx.textAlign = 'center';
       ctx.fillStyle = warm;
       meta.data.forEach((pt, i) => {
@@ -1309,6 +1312,10 @@ async function refresh() {
       document.getElementById('app').innerHTML = `<div class="card error">天気データを取得できませんでした（${e.message}）。時間をおいて再読み込みしてください。</div>`;
   }
 }
+document.fonts?.ready.then(() => {
+  chartSetup();
+  [...charts, ...modalCharts].forEach(c => c.update('none'));
+});
 setupWardSelect();
 setupModal();
 Surf.init();
