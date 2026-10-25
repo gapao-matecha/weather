@@ -23,7 +23,6 @@
     --cool: #3b82f6;
     --rain: #4aa3df;
     --app: #8b5cf6;
-    --frame: #cfd8e3;
     --good: #2e9e6a;
     --warn: #e09a1a;
     --bad: #d6453d;
@@ -37,7 +36,6 @@
       --muted: #8d99a6;
       --line: #263240;
       --accent: #5b9cf0;
-      --frame: #34414f;
       --shadow: 0 2px 12px rgba(0, 0, 0, .3);
     }
   }
@@ -116,7 +114,7 @@
   .hour .tp { font-weight: 700; }
   .hour .pp { font-size: .75rem; color: var(--rain); }
   .chart-box { position: relative; height: 260px; margin-top: 12px; }
-  .chart-box.short { height: 170px; }
+  .chart-box.hourly { height: 220px; } /* 気温・雨は同じ高さにして目盛り線の間隔を揃える */
   .chart-title { font-size: .9rem; font-weight: 700; margin: 18px 0 4px; }
   .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; font-size: .85rem; }
   .legend .ln { display: inline-block; width: 26px; height: 0; vertical-align: middle; margin-right: 6px; }
@@ -411,13 +409,13 @@ function render(data) {
         <span><i class="ln app"></i>体感温度</span>
         <span class="note">体感温度＝風や湿度を考慮した、肌で感じる温度</span>
       </div>
-      <div class="chart-box"><canvas id="hourChart"></canvas></div>
+      <div class="chart-box hourly"><canvas id="hourChart"></canvas></div>
       <div class="chart-title">☔ 雨</div>
       <div class="legend">
         <span><i class="ln bar"></i>降水量 (mm)</span>
         <span><i class="ln prob"></i>降水確率 (%)</span>
       </div>
-      <div class="chart-box short"><canvas id="rainChart"></canvas></div>
+      <div class="chart-box hourly"><canvas id="rainChart"></canvas></div>
     </section>
 
     <section class="card">
@@ -459,20 +457,7 @@ function drawCharts(hours, week, nowHour) {
   Chart.defaults.color = text;
   Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
 
-  // 軸線は消し、描画エリアの四辺を同じ細い枠で囲む（全グラフ共通のあしらい）
   Chart.defaults.scale.border = { display: false };
-  const frame = {
-    id: 'frame',
-    beforeDatasetsDraw(chart) {
-      const { left, top, width, height } = chart.chartArea;
-      const ctx = chart.ctx;
-      ctx.save();
-      ctx.strokeStyle = cssVar('--frame');
-      ctx.lineWidth = 1;
-      ctx.strokeRect(left + .5, top + .5, width - 1, height - 1);
-      ctx.restore();
-    }
-  };
 
   const nowLine = {
     id: 'nowLine',
@@ -516,9 +501,12 @@ function drawCharts(hours, week, nowHour) {
   };
   // 目盛りが細かすぎると小さな差が大きく見えるので、最低でも8℃幅で表示
   const allT = hours.flatMap(h => [h.temp, h.app]);
-  const tMid = (Math.max(...allT) + Math.min(...allT)) / 2;
-  const tHalf = Math.max(4, (Math.max(...allT) - Math.min(...allT)) / 2 + 1.5);
-  const tStep = tHalf > 6 ? 4 : 2;
+  // 2つのグラフの横の目盛り線を揃えるため、どちらも4分割にする
+  const DIV = 4;
+  const tLo = Math.min(...allT) - .5, tHi = Math.max(...allT) + .5;
+  const tStep = [2, 3, 4, 5, 6, 8, 10].find(st => Math.floor(tLo / st) * st + st * DIV >= tHi) || 10;
+  const tMin = Math.floor(tLo / tStep) * tStep;
+  const pStep = [.5, 1, 2, 2.5, 5, 10, 20, 25, 50].find(st => st * DIV >= maxPH) || 50;
   // 2つのグラフで横軸を揃える：目盛りは3時間おき、左右の軸幅も固定
   const every3h = i => hours[i] && hours[i].hour % 3 === 0;
   const xOpts = {
@@ -555,10 +543,10 @@ function drawCharts(hours, week, nowHour) {
       },
       scales: {
         x: xOpts,
-        y: { min: Math.floor((tMid - tHalf) / tStep) * tStep, max: Math.ceil((tMid + tHalf) / tStep) * tStep, grid: { color: grid }, afterFit: fixW, ticks: { stepSize: tStep, callback: v => v + '°' } }
+        y: { min: tMin, max: tMin + tStep * DIV, grid: { color: grid }, afterFit: fixW, ticks: { stepSize: tStep, callback: v => v + '°' } }
       }
     },
-    plugins: [frame, nowLine, tempLabels]
+    plugins: [nowLine, tempLabels]
   }));
 
   charts.push(new Chart(document.getElementById('rainChart'), {
@@ -572,17 +560,18 @@ function drawCharts(hours, week, nowHour) {
     options: {
       maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
+      layout: { padding: { top: 14 } },
       plugins: {
         legend: { display: false },
         tooltip: { callbacks: { label: c => ` ${c.dataset.label}: ${c.dataset.type === 'bar' ? r1(c.parsed.y) + 'mm' : c.parsed.y + '%'}` } }
       },
       scales: {
         x: xOpts,
-        y: { min: 0, suggestedMax: maxPH, grid: { color: grid }, afterFit: fixW, ticks: { maxTicksLimit: 4, callback: v => v + 'mm' } },
-        y1: { position: 'right', min: 0, max: 100, grid: { display: false }, afterFit: fixW, ticks: { stepSize: 50, callback: v => v + '%' } }
+        y: { min: 0, max: pStep * DIV, grid: { color: grid }, afterFit: fixW, ticks: { stepSize: pStep, callback: v => v + 'mm' } },
+        y1: { position: 'right', min: 0, max: 100, grid: { display: false }, afterFit: fixW, ticks: { stepSize: 100 / DIV, callback: v => v + '%' } }
       }
     },
-    plugins: [frame, nowLine]
+    plugins: [nowLine]
   }));
 
   charts.push(new Chart(document.getElementById('weekChart'), {
@@ -603,8 +592,7 @@ function drawCharts(hours, week, nowHour) {
         y: { position: 'left', grid: { color: grid }, ticks: { callback: v => v + '°' }, grace: 2 },
         y1: { position: 'right', min: 0, suggestedMax: maxPW, grid: { display: false }, ticks: { callback: v => v + 'mm' } }
       }
-    },
-    plugins: [frame]
+    }
   }));
 }
 
