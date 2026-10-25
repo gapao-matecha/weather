@@ -482,7 +482,15 @@ function drawCharts(hours, week, nowHour) {
   const tMid = (Math.max(...allT) + Math.min(...allT)) / 2;
   const tHalf = Math.max(4, (Math.max(...allT) - Math.min(...allT)) / 2 + 1.5);
   const tStep = tHalf > 6 ? 4 : 2;
-  const xOpts = { grid: { color: grid }, ticks: { maxRotation: 0, autoSkip: true, autoSkipPadding: 8 } };
+  // 2つのグラフで横軸を揃える：目盛りは3時間おき、左右の軸幅も固定
+  const every3h = i => hours[i] && hours[i].hour % 3 === 0;
+  const xOpts = {
+    offset: true, // 棒グラフと折れ線で時刻の位置を一致させる
+    grid: { color: c => every3h(c.index) ? grid : 'transparent' },
+    ticks: { maxRotation: 0, autoSkip: false, callback: (v, i) => every3h(i) ? hours[i].hour + '時' : '' }
+  };
+  const AXIS_W = 46;
+  const fixW = scale => { scale.width = AXIS_W; };
   charts.push(new Chart(document.getElementById('hourChart'), {
     type: 'line',
     data: {
@@ -495,7 +503,7 @@ function drawCharts(hours, week, nowHour) {
     options: {
       maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
-      layout: { padding: { top: 14 } },
+      layout: { padding: { top: 14, right: AXIS_W } },
       plugins: {
         legend: { display: false },
         tooltip: {
@@ -510,7 +518,7 @@ function drawCharts(hours, week, nowHour) {
       },
       scales: {
         x: xOpts,
-        y: { min: Math.floor((tMid - tHalf) / tStep) * tStep, max: Math.ceil((tMid + tHalf) / tStep) * tStep, grid: { color: grid }, ticks: { stepSize: tStep, callback: v => v + '°' } }
+        y: { min: Math.floor((tMid - tHalf) / tStep) * tStep, max: Math.ceil((tMid + tHalf) / tStep) * tStep, grid: { color: grid }, afterFit: fixW, ticks: { stepSize: tStep, callback: v => v + '°' } }
       }
     },
     plugins: [nowLine, tempLabels]
@@ -533,8 +541,8 @@ function drawCharts(hours, week, nowHour) {
       },
       scales: {
         x: xOpts,
-        y: { min: 0, suggestedMax: maxPH, grid: { color: grid }, ticks: { maxTicksLimit: 4, callback: v => v + 'mm' } },
-        y1: { position: 'right', min: 0, max: 100, grid: { display: false }, ticks: { stepSize: 50, callback: v => v + '%' } }
+        y: { min: 0, suggestedMax: maxPH, grid: { color: grid }, afterFit: fixW, ticks: { maxTicksLimit: 4, callback: v => v + 'mm' } },
+        y1: { position: 'right', min: 0, max: 100, grid: { display: false }, afterFit: fixW, ticks: { stepSize: 50, callback: v => v + '%' } }
       }
     },
     plugins: [nowLine]
