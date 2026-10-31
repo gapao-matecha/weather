@@ -1,0 +1,111 @@
+// 毎朝の天気サマリを LINE に送る（GitHub Actions から実行）
+// 判定の基準はサイト（index.html）の「今日のポイント」と同じ。
+//
+// 環境変数:
+//   LINE_CHANNEL_ACCESS_TOKEN  Messaging API のチャネルアクセストークン（GitHub Secrets）
+//   LINE_USER_ID               送り先（自分）のユーザーID（GitHub Secrets）
+//   WARD                       区の名前（省略時は目黒区）
+//   DRY_RUN=1                  送らずに文面だけ表示する（トークン未設定のときも同じ）
+
+const WARDS = {
+  千代田区: [35.6940, 139.7536], 中央区: [35.6706, 139.7720], 港区: [35.6581, 139.7516],
+  新宿区: [35.6938, 139.7036], 文京区: [35.7080, 139.7521], 台東区: [35.7126, 139.7800],
+  墨田区: [35.7107, 139.8015], 江東区: [35.6730, 139.8171], 品川区: [35.6092, 139.7302],
+  目黒区: [35.6414, 139.6982], 大田区: [35.5613, 139.7160], 世田谷区: [35.6464, 139.6533],
+  渋谷区: [35.6639, 139.6978], 中野区: [35.7074, 139.6638], 杉並区: [35.6995, 139.6364],
+  豊島区: [35.7263, 139.7166], 北区: [35.7528, 139.7337], 荒川区: [35.7362, 139.7834],
+  板橋区: [35.7512, 139.7094], 練馬区: [35.7356, 139.6517], 足立区: [35.7750, 139.8044],
+  葛飾区: [35.7434, 139.8471], 江戸川区: [35.7067, 139.8683],
+};
+const SITE = 'https://gapao-matecha.github.io/weather/';
+const DOW = ['日', '月', '火', '水', '木', '金', '土'];
+const WMO = {
+  0: '快晴', 1: '晴れ', 2: '晴れ時々くもり', 3: 'くもり', 45: '霧', 48: '霧',
+  51: '霧雨', 53: '霧雨', 55: '霧雨', 56: '着氷性の霧雨', 57: '着氷性の霧雨',
+  61: '小雨', 63: '雨', 65: '強い雨', 66: '着氷性の雨', 67: '着氷性の雨',
+  71: '小雪', 73: '雪', 75: '大雪', 77: '霧雪', 80: 'にわか雨', 81: 'にわか雨', 82: '激しいにわか雨',
+  85: 'にわか雪', 86: '激しいにわか雪', 95: '雷雨', 96: '雷雨（ひょう）', 99: '激しい雷雨',
+};
+const r0 = v => Math.round(v);
+const r1 = v => Math.round(v * 10) / 10;
+
+function feel(max, min) {
+  const t = (max * 2 + min) / 3;
+  if (t <= 5) return ['🥶', 'とても寒い', 'ダウンやマフラー、手袋で防寒をしっかり。'];
+  if (t <= 11) return ['🧥', '寒い', 'コートやセーターなど冬物がおすすめ。'];
+  if (t <= 16) return ['🧣', '肌寒い', '薄手のコートやジャケットを羽織って。'];
+  if (t <= 21) return ['👕', '過ごしやすい', '長袖シャツやカーディガンでちょうど良さそう。'];
+  if (t <= 26) return ['🌤️', '暖かい', '半袖〜薄手の長袖で快適。'];
+  if (t <= 31) return ['🥵', '暑い', '半袖で。こまめな水分補給を。'];
+  return ['🔥', '猛暑', '熱中症に厳重警戒。外出は涼しい時間帯に。'];
+}
+
+// 外出しそうな 7〜22 時を対象に判定
+function umbrella(hours) {
+  const active = hours.filter(h => h.hour >= 7 && h.hour <= 22);
+  const maxProb = Math.max(...active.map(h => h.prob ?? 0));
+  const sum = active.reduce((a, h) => a + (h.precip || 0), 0);
+  const rainy = active.filter(h => (h.prob ?? 0) >= 50 || h.precip >= 0.5);
+  const span = rainy.length ? `${rainy[0].hour}時〜${rainy.at(-1).hour + 1}時ごろ` : '';
+  if (maxProb >= 60 || sum >= 2) return { head: '☂️ 傘を持って出かけよう', detail: `降水確率 最大${maxProb}%・日中 ${r1(sum)}mm${span ? `（${span}に雨）` : ''}` };
+  if (maxProb >= 30 || sum >= 0.3) return { head: '🌂 折りたたみ傘があると安心', detail: `降水確率 最大${maxProb}%${span ? `（${span}に降るかも）` : ''}` };
+  return { head: '😎 傘はいらなそう', detail: `降水確率 最大${maxProb}%` };
+}
+
+async function main() {
+  const ward = WARDS[process.env.WARD] ? process.env.WARD : '目黒区';
+  const [lat, lon] = WARDS[ward];
+  const url = 'https://api.open-meteo.com/v1/forecast?' + new URLSearchParams({
+    latitude: lat, longitude: lon, timezone: 'Asia/Tokyo', past_days: 1, forecast_days: 1,
+    hourly: 'precipitation,precipitation_probability',
+    daily: 'weather_code,temperature_2m_max,temperature_2m_min,uv_index_max,wind_speed_10m_max',
+  });
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Open-Meteo HTTP ${res.status}`);
+  const { daily: D, hourly: H } = await res.json();
+
+  // daily は [昨日, 今日]
+  const date = D.time[1];
+  const today = { code: D.weather_code[1], max: D.temperature_2m_max[1], min: D.temperature_2m_min[1], uv: D.uv_index_max[1], wind: D.wind_speed_10m_max[1] };
+  const yestMax = D.temperature_2m_max[0];
+  const hours = H.time.map((t, i) => ({ t, hour: +t.slice(11, 13), precip: H.precipitation[i], prob: H.precipitation_probability[i] }))
+    .filter(h => h.t.startsWith(date));
+
+  const [fe, ft, fd] = feel(today.max, today.min);
+  const u = umbrella(hours);
+  const notes = [];
+  const diff = r1(today.max - yestMax);
+  if (Math.abs(diff) >= 1) notes.push(`${diff > 0 ? '📈' : '📉'} 昨日より${Math.abs(diff)}℃${diff > 0 ? '高い' : '低い'}`);
+  if (today.max - today.min >= 9) notes.push(`🌡️ 寒暖差 ${r0(today.max - today.min)}℃`);
+  if (today.uv >= 6) notes.push(`🧴 紫外線が強い（UV ${r1(today.uv)}）`);
+  if (today.wind >= 30) notes.push(`💨 風が強い（最大 ${r0(today.wind / 3.6)}m/s）`);
+
+  const dow = DOW[new Date(date + 'T12:00:00Z').getUTCDay()];
+  const lines = [
+    u.head,
+    `📍 ${ward} ${+date.slice(5, 7)}/${+date.slice(8)}(${dow}) ${WMO[today.code] ?? ''} ${r0(today.max)}℃ / ${r0(today.min)}℃`,
+    '',
+    `${fe} ${ft}：${fd}`,
+    `💧 ${u.detail}`,
+    ...notes,
+    '',
+    `詳しくは ${SITE}?ward=${encodeURIComponent(ward)}`,
+  ];
+  const text = lines.join('\n');
+
+  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN, to = process.env.LINE_USER_ID;
+  if (process.env.DRY_RUN || !token || !to) {
+    console.log(text);
+    if (!process.env.DRY_RUN) console.log('\n（LINE_CHANNEL_ACCESS_TOKEN / LINE_USER_ID が未設定のため送信していません）');
+    return;
+  }
+  const send = await fetch('https://api.line.me/v2/bot/message/push', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ to, messages: [{ type: 'text', text }] }),
+  });
+  if (!send.ok) throw new Error(`LINE HTTP ${send.status}: ${await send.text()}`);
+  console.log('LINE に送信しました');
+}
+
+main().catch(e => { console.error(e); process.exit(1); });

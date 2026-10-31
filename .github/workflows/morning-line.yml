@@ -1,0 +1,26 @@
+name: 毎朝の天気をLINEに送る
+
+on:
+  schedule:
+    # 6:45 JST（GitHub の定時実行は混雑で遅れることがあるため、7時ごろに届くよう早めに起動）
+    - cron: '45 21 * * *'
+  workflow_dispatch: # Actions 画面の「Run workflow」から手動で送れる
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 天気サマリを送信
+        run: node scripts/morning-line.mjs
+        env:
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
+          WARD: 目黒区
