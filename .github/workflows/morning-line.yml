@@ -24,3 +24,5 @@ jobs:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
           WARD: 目黒区
+          # 手動実行（Run workflow）のときは「【テスト送信】」付きで送る
+          TEST: ${{ github.event_name == 'workflow_dispatch' && '1' || '' }}
