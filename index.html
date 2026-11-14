@@ -220,6 +220,12 @@
 
   .loading, .error { text-align: center; padding: 60px 0; color: var(--muted); }
   .error { color: var(--bad); }
+  .error p { margin: 0 0 6px; }
+  .error .err-sub { color: var(--muted); font-size: .85rem; }
+  .error .retry {
+    margin-top: 10px; font: inherit; font-weight: 700; color: #fff; background: var(--accent);
+    border: none; border-radius: 999px; padding: 8px 20px; cursor: pointer;
+  }
   footer { text-align: center; color: var(--muted); font-size: .78rem; margin-top: 8px; }
   footer a { color: inherit; }
 
@@ -413,6 +419,36 @@ function todayStr() {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+
+// Open-Meteo が一時的につながらないことがあるため、タイムアウト付きで最大3回まで取り直す
+async function fetchJSON(url, { tries = 3, timeout = 10000 } = {}) {
+  let last;
+  for (let i = 0; i < tries; i++) {
+    if (i) await new Promise(r => setTimeout(r, 1000 * 2 ** (i - 1))); // 1秒・2秒待って再試行
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeout);
+    try {
+      const res = await fetch(url, { signal: ctrl.signal });
+      if (res.ok) return await res.json();
+      last = new Error(`サーバーエラー ${res.status}`);
+      if (res.status < 500 && res.status !== 429) break; // リクエスト自体の誤りは取り直しても同じ
+    } catch (e) {
+      last = new Error(e.name === 'AbortError' ? '応答がありませんでした' : '通信がつながりませんでした');
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw last;
+}
+
+// 取得に失敗したときのカード（再試行ボタン付き）
+function errorCard(what, e, onRetry) {
+  const card = document.createElement('div');
+  card.className = 'card error';
+  card.innerHTML = `<p>${what}を取得できませんでした（${e.message}）。</p><p class="err-sub">30秒後に自動でもう一度読み込みます。</p><button type="button" class="retry">今すぐ再読み込み</button>`;
+  card.querySelector('.retry').addEventListener('click', onRetry);
+  return card;
+}
 
 /* ---------- サマリ生成 ---------- */
 function feel(max, min, appMax) {
@@ -746,9 +782,7 @@ async function load() {
     hourly: 'temperature_2m,apparent_temperature,precipitation,precipitation_probability,weather_code,is_day',
     daily: 'weather_code,temperature_2m_max,temperature_2m_min,apparent_temperature_max,precipitation_sum,precipitation_probability_max,uv_index_max,wind_speed_10m_max,sunrise,sunset'
   });
-  const res = await fetch(url);
-  if (!res.ok) throw new Error('HTTP ' + res.status);
-  return res.json();
+  return fetchJSON(url);
 }
 
 function render(data) {
@@ -971,10 +1005,7 @@ const Surf = (() => {
     const q = `latitude=${spot.lat}&longitude=${spot.lon}&timezone=auto&forecast_days=7`;
     const marineUrl = `https://marine-api.open-meteo.com/v1/marine?${q}&cell_selection=sea&hourly=wave_height,wave_direction,wave_period,swell_wave_height,swell_wave_direction,swell_wave_period,wind_wave_height,sea_surface_temperature,sea_level_height_msl`;
     const wxUrl = `https://api.open-meteo.com/v1/forecast?${q}&wind_speed_unit=ms&hourly=wind_speed_10m,wind_direction_10m,wind_gusts_10m,temperature_2m,weather_code&daily=sunrise,sunset`;
-    const [m, w] = await Promise.all([marineUrl, wxUrl].map(u => fetch(u).then(r => {
-      if (!r.ok) throw new Error(`API ${r.status}`);
-      return r.json();
-    })));
+    const [m, w] = await Promise.all([fetchJSON(marineUrl), fetchJSON(wxUrl)]);
 
     const wIdx = new Map(w.hourly.time.map((t, i) => [t, i]));
     const hours = m.hourly.time.map((t, i) => {
@@ -1012,7 +1043,7 @@ const Surf = (() => {
   // スポットの現地時刻の "YYYY-MM-DDTHH:00" を作る（APIの時刻表記と合わせる）
   const localHourKey = utcOffset => new Date(Date.now() + utcOffset * 1000).toISOString().slice(0, 13) + ':00';
 
-  let spot = null, current = null, loadedAt = 0, reqId = 0, tides = [];
+  let spot = null, current = null, loadedAt = 0, reqId = 0, tides = [], retryTimer = 0;
   let moveCursor = () => {};
   const COL = 9, PAD_L = 34;
 
@@ -1033,8 +1064,11 @@ const Surf = (() => {
       render();
     } catch (e) {
       console.error(e);
-      if (id === reqId && !(current && current.spot === spot))
-        $id('surf').innerHTML = `<div class="card error">波予報を取得できませんでした（${e.message}）。時間をおいて再読み込みしてください。</div>`;
+      if (id === reqId && !(current && current.spot === spot)) {
+        $id('surf').replaceChildren(errorCard('波予報', e, () => load()));
+        clearTimeout(retryTimer);
+        retryTimer = setTimeout(() => { if (id === reqId) load(); }, 30000);
+      }
     }
   }
 
@@ -1298,7 +1332,7 @@ function setupViewTabs() {
   setView(fromUrl || saved || 'weather', false);
 }
 
-let reqId = 0;
+let reqId = 0, weatherRetry = 0;
 async function refresh() {
   const id = ++reqId; // 区を素早く切り替えたとき、古い応答で上書きしない
   if (view === 'weather') document.title = `東京都の天気（${ward.name}）`;
@@ -1308,8 +1342,11 @@ async function refresh() {
     if (view === 'weather') render(data); else pendingWeather = data;
   } catch (e) {
     console.error(e);
-    if (id === reqId && !document.querySelector('.hero'))
-      document.getElementById('app').innerHTML = `<div class="card error">天気データを取得できませんでした（${e.message}）。時間をおいて再読み込みしてください。</div>`;
+    if (id === reqId && !document.querySelector('.hero')) {
+      document.getElementById('app').replaceChildren(errorCard('天気データ', e, () => refresh()));
+      clearTimeout(weatherRetry);
+      weatherRetry = setTimeout(() => { if (id === reqId) refresh(); }, 30000);
+    }
   }
 }
 document.fonts?.ready.then(() => {
