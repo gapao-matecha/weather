@@ -52,6 +52,22 @@ function umbrella(hours) {
   return { head: '😎 傘はいらなそう', detail: `降水確率 最大${maxProb}%` };
 }
 
+// Open-Meteo が一時的につながらないことがあるため、最大3回まで取り直す
+async function fetchJSON(url, tries = 3) {
+  let last;
+  for (let i = 0; i < tries; i++) {
+    if (i) await new Promise(r => setTimeout(r, 5000 * i));
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+      if (res.ok) return await res.json();
+      last = new Error(`Open-Meteo HTTP ${res.status}`);
+    } catch (e) {
+      last = e;
+    }
+  }
+  throw last;
+}
+
 async function main() {
   const ward = WARDS[process.env.WARD] ? process.env.WARD : '目黒区';
   const [lat, lon] = WARDS[ward];
@@ -60,9 +76,7 @@ async function main() {
     hourly: 'precipitation,precipitation_probability',
     daily: 'weather_code,temperature_2m_max,temperature_2m_min,uv_index_max,wind_speed_10m_max',
   });
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Open-Meteo HTTP ${res.status}`);
-  const { daily: D, hourly: H } = await res.json();
+  const { daily: D, hourly: H } = await fetchJSON(url);
 
   // daily は [昨日, 今日]
   const date = D.time[1];
