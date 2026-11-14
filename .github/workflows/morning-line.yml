@@ -12,7 +12,7 @@ permissions:
 jobs:
   notify:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15 # 天気データの取り直し（最大10分）に余裕を持たせる
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -26,3 +26,5 @@ jobs:
           WARD: 目黒区
           # 手動実行（Run workflow）のときは「【テスト送信】」付きで送る
           TEST: ${{ github.event_name == 'workflow_dispatch' && '1' || '' }}
+          # 毎朝の実行は、天気データが取れなければ最大10分取り直す（手動実行はすぐ結果が分かるよう1分）
+          RETRY_MINUTES: ${{ github.event_name == 'schedule' && '10' || '1' }}

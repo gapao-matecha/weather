@@ -6,7 +6,8 @@
 //   LINE_USER_ID               送り先（自分）のユーザーID（GitHub Secrets）
 //   WARD                       区の名前（省略時は目黒区）
 //   DRY_RUN=1                  送らずに文面だけ表示する（トークン未設定のときも同じ）
-//   TEST=1                     「【テスト送信】」付きで送る。天気が取れなくても配信の確認用に送る
+//   TEST=1                     「【テスト送信】」付きで送る
+//   RETRY_MINUTES              天気データが取れないとき、この分数のあいだ取り直す（省略時は3回だけ）
 
 const WARDS = {
   千代田区: [35.6940, 139.7536], 中央区: [35.6706, 139.7720], 港区: [35.6581, 139.7516],
@@ -53,11 +54,12 @@ function umbrella(hours) {
   return { head: '😎 傘はいらなそう', detail: `降水確率 最大${maxProb}%` };
 }
 
-// Open-Meteo が一時的につながらないことがあるため、最大3回まで取り直す
-async function fetchJSON(url, tries = 3) {
+// Open-Meteo が数分単位でつながらないことがあるため、RETRY_MINUTES の間は間隔を空けながら取り直す
+// （未指定なら3回だけ。毎朝の実行では長めに粘る）
+async function fetchJSON(url) {
+  const deadline = Date.now() + (Number(process.env.RETRY_MINUTES) || 0) * 60_000;
   let last;
-  for (let i = 0; i < tries; i++) {
-    if (i) await new Promise(r => setTimeout(r, 5000 * i));
+  for (let i = 0; ; i++) {
     try {
       const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
       if (res.ok) return await res.json();
@@ -65,8 +67,26 @@ async function fetchJSON(url, tries = 3) {
     } catch (e) {
       last = e;
     }
+    const wait = Math.min(60_000, 5000 * 2 ** i); // 5秒・10秒・20秒・40秒・以降1分おき
+    if (i >= 2 && Date.now() + wait > deadline) break;
+    console.error(`天気データの取得に失敗（${last.cause?.code || last.message}）。${wait / 1000}秒後に取り直します`);
+    await new Promise(r => setTimeout(r, wait));
   }
   throw last;
+}
+
+// 天気が取れなかった朝に送る文面
+function fallbackText() {
+  const ward = WARDS[process.env.WARD] ? process.env.WARD : '目黒区';
+  const jst = new Date(Date.now() + 9 * 3600_000);
+  const date = `${jst.getUTCMonth() + 1}/${jst.getUTCDate()}(${DOW[jst.getUTCDay()]})`;
+  return [
+    '⚠️ 今朝は天気データを取得できませんでした',
+    `📍 ${ward} ${date}`,
+    '',
+    '天気の提供元につながらなかったため、サマリを作れませんでした。',
+    `最新の天気はサイトで確認してください：${SITE}?ward=${encodeURIComponent(ward)}`,
+  ].join('\n');
 }
 
 async function buildText() {
@@ -110,17 +130,17 @@ async function buildText() {
 }
 
 async function main() {
-  // TEST=1 のときは「テスト送信」と分かる文面にし、天気が取れなくても LINE への配信だけは確かめられるようにする
-  const test = !!process.env.TEST;
+  // 天気が取れなくても何も届かない朝にならないよう、代わりの文面を送る
+  // TEST=1（手動実行）のときは「テスト送信」と分かるようにする
   let text;
   try {
     text = await buildText();
   } catch (e) {
-    if (!test) throw e;
-    console.error(`天気データを取得できませんでした（${e.cause?.code || e.message}）。LINE への配信だけ確認します。`);
-    text = 'LINE 通知の設定は完了しています。\n（天気データはこのとき取得できなかったため、本番では天気サマリが届きます）';
+    console.error(`天気データを取得できませんでした（${e.cause?.code || e.message}）。代わりの文面を送ります。`);
+    console.log('::warning::天気データを取得できなかったため、代わりの文面を送りました');
+    text = fallbackText();
   }
-  if (test) text = `【テスト送信】\n${text}`;
+  if (process.env.TEST) text = `【テスト送信】\n${text}`;
 
   const token = process.env.LINE_CHANNEL_ACCESS_TOKEN, to = process.env.LINE_USER_ID;
   if (process.env.DRY_RUN || !token || !to) {
