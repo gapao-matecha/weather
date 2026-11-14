@@ -6,6 +6,7 @@
 //   LINE_USER_ID               送り先（自分）のユーザーID（GitHub Secrets）
 //   WARD                       区の名前（省略時は目黒区）
 //   DRY_RUN=1                  送らずに文面だけ表示する（トークン未設定のときも同じ）
+//   TEST=1                     「【テスト送信】」付きで送る。天気が取れなくても配信の確認用に送る
 
 const WARDS = {
   千代田区: [35.6940, 139.7536], 中央区: [35.6706, 139.7720], 港区: [35.6581, 139.7516],
@@ -68,7 +69,7 @@ async function fetchJSON(url, tries = 3) {
   throw last;
 }
 
-async function main() {
+async function buildText() {
   const ward = WARDS[process.env.WARD] ? process.env.WARD : '目黒区';
   const [lat, lon] = WARDS[ward];
   const url = 'https://api.open-meteo.com/v1/forecast?' + new URLSearchParams({
@@ -105,7 +106,21 @@ async function main() {
     '',
     `詳しくは ${SITE}?ward=${encodeURIComponent(ward)}`,
   ];
-  const text = lines.join('\n');
+  return lines.join('\n');
+}
+
+async function main() {
+  // TEST=1 のときは「テスト送信」と分かる文面にし、天気が取れなくても LINE への配信だけは確かめられるようにする
+  const test = !!process.env.TEST;
+  let text;
+  try {
+    text = await buildText();
+  } catch (e) {
+    if (!test) throw e;
+    console.error(`天気データを取得できませんでした（${e.cause?.code || e.message}）。LINE への配信だけ確認します。`);
+    text = 'LINE 通知の設定は完了しています。\n（天気データはこのとき取得できなかったため、本番では天気サマリが届きます）';
+  }
+  if (test) text = `【テスト送信】\n${text}`;
 
   const token = process.env.LINE_CHANNEL_ACCESS_TOKEN, to = process.env.LINE_USER_ID;
   if (process.env.DRY_RUN || !token || !to) {
