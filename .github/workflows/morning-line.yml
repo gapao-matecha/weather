@@ -1,30 +1,62 @@
 name: 毎朝の天気をLINEに送る
+# テスト送信かどうかが実行一覧で分かるようにする（二重送信の判定にも使う）
+run-name: ${{ (github.event_name == 'workflow_dispatch' && inputs.test) && '【テスト】天気をLINEに送る' || '毎朝の天気をLINEに送る' }}
 
 on:
+  # 本番は外部タイマー（cron-job.org）が毎朝 7:00 に API から test=false で起動する
+  workflow_dispatch:
+    inputs:
+      test:
+        description: テスト送信にする（「【テスト送信】」付きで、二重送信の判定もしない）
+        type: boolean
+        default: true # Actions 画面の「Run workflow」から押したときはテスト送信
+  # 予備：外部タイマーが動かなかった朝のため。GitHub の定時実行は大きく遅れることがあるので 7:30 JST に設定
   schedule:
-    # 6:45 JST（GitHub の定時実行は混雑で遅れることがあるため、7時ごろに届くよう早めに起動）
-    - cron: '45 21 * * *'
-  workflow_dispatch: # Actions 画面の「Run workflow」から手動で送れる
+    - cron: '30 22 * * *'
 
 permissions:
   contents: read
+  actions: read # 今日すでに送ったかを実行履歴で確認するため
+
+# 外部タイマーと予備が重なっても同時には走らせない（後の方が「送信済み」を見て止まる）
+concurrency:
+  group: morning-line
+  cancel-in-progress: false
 
 jobs:
   notify:
     runs-on: ubuntu-latest
     timeout-minutes: 15 # 天気データの取り直し（最大10分）に余裕を持たせる
+    env:
+      IS_TEST: ${{ (github.event_name == 'workflow_dispatch' && inputs.test) && '1' || '' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: 今日すでに送ったか確認
+        id: check
+        if: env.IS_TEST != '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          since=$(date -u -d "$(TZ=Asia/Tokyo date +%F) 00:00 +0900" +%Y-%m-%dT%H:%M:%SZ)
+          sent=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/morning-line.yml/runs?status=success&created=>=$since&per_page=50" \
+            --jq "[.workflow_runs[] | select(.id != $GITHUB_RUN_ID and .display_title == \"毎朝の天気をLINEに送る\")] | length")
+          echo "今日（JST）の送信済み: ${sent}件"
+          if [ "$sent" -gt 0 ]; then
+            echo "sent=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::今日はすでに送信済みのため、送信しません"
+          fi
+      - uses: actions/checkout@v7
+        if: steps.check.outputs.sent != 'true'
+      - uses: actions/setup-node@v7
+        if: steps.check.outputs.sent != 'true'
         with:
-          node-version: 22
+          node-version: 24
       - name: 天気サマリを送信
+        if: steps.check.outputs.sent != 'true'
         run: node scripts/morning-line.mjs
         env:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
           WARD: 目黒区
-          # 手動実行（Run workflow）のときは「【テスト送信】」付きで送る
-          TEST: ${{ github.event_name == 'workflow_dispatch' && '1' || '' }}
-          # 毎朝の実行は、天気データが取れなければ最大10分取り直す（手動実行はすぐ結果が分かるよう1分）
-          RETRY_MINUTES: ${{ github.event_name == 'schedule' && '10' || '1' }}
+          TEST: ${{ env.IS_TEST }}
+          # 本番は天気データが取れなければ最大10分取り直す（テストはすぐ結果が分かるよう1分）
+          RETRY_MINUTES: ${{ env.IS_TEST == '1' && '1' || '10' }}
