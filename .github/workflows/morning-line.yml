@@ -3,22 +3,28 @@ name: 毎朝の天気をLINEに送る
 run-name: ${{ (github.event_name == 'workflow_dispatch' && inputs.test) && '【テスト】天気をLINEに送る' || '毎朝の天気をLINEに送る' }}
 
 on:
-  # 本番は外部タイマー（cron-job.org）が毎朝 7:00 に API から test=false で起動する
+  # 手動実行（Actions 画面の「Run workflow」や gh workflow run）
   workflow_dispatch:
     inputs:
       test:
         description: テスト送信にする（「【テスト送信】」付きで、二重送信の判定もしない）
         type: boolean
         default: true # Actions 画面の「Run workflow」から押したときはテスト送信
-  # 予備：外部タイマーが動かなかった朝のため。GitHub の定時実行は大きく遅れることがあるので 7:30 JST に設定
+  # GitHub の定時実行は毎朝3〜4時間遅れて起動している（11/15・11/16 実績）。
+  # そのため深夜〜早朝に何度か起動を予約し、7:00 より前に起動した回は 7:00 まで待ってから送る。
+  # 最初に送った1回以外は「送信済み」を見て止まる。（時刻は UTC。JST 2:10・3:10・4:10・5:10・6:40）
   schedule:
-    - cron: '30 22 * * *'
+    - cron: '10 17 * * *'
+    - cron: '10 18 * * *'
+    - cron: '10 19 * * *'
+    - cron: '10 20 * * *'
+    - cron: '40 21 * * *'
 
 permissions:
   contents: read
   actions: read # 今日すでに送ったかを実行履歴で確認するため
 
-# 外部タイマーと予備が重なっても同時には走らせない（後の方が「送信済み」を見て止まる）
+# 複数の起動が重なっても同時には走らせない（後の方が「送信済み」を見て止まる）
 concurrency:
   group: morning-line
   cancel-in-progress: false
@@ -26,10 +32,22 @@ concurrency:
 jobs:
   notify:
     runs-on: ubuntu-latest
-    timeout-minutes: 15 # 天気データの取り直し（最大10分）に余裕を持たせる
+    timeout-minutes: 330 # 7:00 までの待ち（最大約5時間）＋天気データの取り直し（最大10分）
     env:
       IS_TEST: ${{ (github.event_name == 'workflow_dispatch' && inputs.test) && '1' || '' }}
     steps:
+      - name: 7:00（日本時間）まで待つ
+        if: env.IS_TEST != '1'
+        run: |
+          now=$(date +%s)
+          target=$(date -d "$(TZ=Asia/Tokyo date +%F) 07:00 +0900" +%s)
+          if [ "$now" -lt "$target" ]; then
+            wait=$((target - now))
+            echo "7:00 まで $((wait / 60)) 分待ちます"
+            sleep "$wait"
+          else
+            echo "7:00 を過ぎているので待たずに進みます"
+          fi
       - name: 今日すでに送ったか確認
         id: check
         if: env.IS_TEST != '1'
