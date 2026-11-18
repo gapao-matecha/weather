@@ -462,9 +462,12 @@ function feel(max, min, appMax) {
   return { emoji: '🔥', t: '猛暑', d: '熱中症に厳重警戒。外出は涼しい時間帯に。', cls: 'bad' };
 }
 
+// 判定の対象は出勤後〜夜の 9〜22 時（寝ている時間帯は見ない）
+const ACTIVE_FROM = 9, ACTIVE_TO = 22;
+const activeHours = hours => hours.filter(h => h.hour >= ACTIVE_FROM && h.hour <= ACTIVE_TO);
+
 function umbrella(hours) {
-  // 外出しそうな 7〜22 時を対象
-  const active = hours.filter(h => h.hour >= 7 && h.hour <= 22);
+  const active = activeHours(hours);
   const maxProb = Math.max(...active.map(h => h.prob ?? 0));
   const sum = active.reduce((a, h) => a + (h.precip || 0), 0);
   const rainy = active.filter(h => (h.prob ?? 0) >= 50 || h.precip >= 0.5);
@@ -478,7 +481,11 @@ function umbrella(hours) {
 
 function buildTips(today, yest, hours, current) {
   const tips = [];
-  const f = feel(today.max, today.min, today.appMax);
+  // 服装・寒暖差は 9〜22 時の気温で判定（早朝の最低気温は使わない）
+  const temps = activeHours(hours).map(h => h.temp).filter(v => v != null);
+  const dayMax = temps.length ? Math.max(...temps) : today.max;
+  const dayMin = temps.length ? Math.min(...temps) : today.min;
+  const f = feel(dayMax, dayMin, today.appMax);
   tips.push(f);
   const u = umbrella(hours);
   tips.push(u);
@@ -496,9 +503,9 @@ function buildTips(today, yest, hours, current) {
       tips.push({ emoji: '➖', t: '昨日とほぼ同じ気温', d: `昨日の最高 ${r0(yest.max)}℃ / 今日 ${r0(today.max)}℃。`, cls: 'info' });
     }
   }
-  const range = today.max - today.min;
-  if (range >= 9) {
-    tips.push({ emoji: '🌡️', t: `寒暖差 ${r0(range)}℃ に注意`, d: '朝晩は冷えます。脱ぎ着しやすい服装で。', cls: 'warn' });
+  const range = dayMax - dayMin;
+  if (range >= 7) {
+    tips.push({ emoji: '🌡️', t: `日中の寒暖差 ${r0(range)}℃ に注意`, d: `${ACTIVE_FROM}〜${ACTIVE_TO}時で ${r0(dayMin)}〜${r0(dayMax)}℃。脱ぎ着しやすい服装で。`, cls: 'warn' });
   }
   if (today.uv >= 6) {
     tips.push({ emoji: '🧴', t: `紫外線が強い（UV ${r1(today.uv)}）`, d: '日焼け止め・帽子・サングラスを。', cls: 'warn' });

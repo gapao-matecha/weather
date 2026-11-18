@@ -42,9 +42,12 @@ function feel(max, min) {
   return ['🔥', '猛暑', '熱中症に厳重警戒。外出は涼しい時間帯に。'];
 }
 
-// 外出しそうな 7〜22 時を対象に判定
+// 判定の対象は出勤後〜夜の 9〜22 時（寝ている時間帯は見ない）
+const ACTIVE_FROM = 9, ACTIVE_TO = 22;
+const activeHours = hours => hours.filter(h => h.hour >= ACTIVE_FROM && h.hour <= ACTIVE_TO);
+
 function umbrella(hours) {
-  const active = hours.filter(h => h.hour >= 7 && h.hour <= 22);
+  const active = activeHours(hours);
   const maxProb = Math.max(...active.map(h => h.prob ?? 0));
   const sum = active.reduce((a, h) => a + (h.precip || 0), 0);
   const rainy = active.filter(h => (h.prob ?? 0) >= 50 || h.precip >= 0.5);
@@ -94,7 +97,7 @@ async function buildText() {
   const [lat, lon] = WARDS[ward];
   const url = 'https://api.open-meteo.com/v1/forecast?' + new URLSearchParams({
     latitude: lat, longitude: lon, timezone: 'Asia/Tokyo', past_days: 1, forecast_days: 1,
-    hourly: 'precipitation,precipitation_probability',
+    hourly: 'temperature_2m,precipitation,precipitation_probability',
     daily: 'weather_code,temperature_2m_max,temperature_2m_min,uv_index_max,wind_speed_10m_max',
   });
   const { daily: D, hourly: H } = await fetchJSON(url);
@@ -103,15 +106,19 @@ async function buildText() {
   const date = D.time[1];
   const today = { code: D.weather_code[1], max: D.temperature_2m_max[1], min: D.temperature_2m_min[1], uv: D.uv_index_max[1], wind: D.wind_speed_10m_max[1] };
   const yestMax = D.temperature_2m_max[0];
-  const hours = H.time.map((t, i) => ({ t, hour: +t.slice(11, 13), precip: H.precipitation[i], prob: H.precipitation_probability[i] }))
+  const hours = H.time.map((t, i) => ({ t, hour: +t.slice(11, 13), temp: H.temperature_2m[i], precip: H.precipitation[i], prob: H.precipitation_probability[i] }))
     .filter(h => h.t.startsWith(date));
 
-  const [fe, ft, fd] = feel(today.max, today.min);
+  // 服装・寒暖差は 9〜22 時の気温で判定（早朝の最低気温は使わない）
+  const temps = activeHours(hours).map(h => h.temp).filter(v => v != null);
+  const dayMax = temps.length ? Math.max(...temps) : today.max;
+  const dayMin = temps.length ? Math.min(...temps) : today.min;
+  const [fe, ft, fd] = feel(dayMax, dayMin);
   const u = umbrella(hours);
   const notes = [];
   const diff = r1(today.max - yestMax);
   if (Math.abs(diff) >= 1) notes.push(`${diff > 0 ? '📈' : '📉'} 昨日より${Math.abs(diff)}℃${diff > 0 ? '高い' : '低い'}`);
-  if (today.max - today.min >= 9) notes.push(`🌡️ 寒暖差 ${r0(today.max - today.min)}℃`);
+  if (dayMax - dayMin >= 7) notes.push(`🌡️ 日中の寒暖差 ${r0(dayMax - dayMin)}℃（${ACTIVE_FROM}〜${ACTIVE_TO}時で ${r0(dayMin)}〜${r0(dayMax)}℃）`);
   if (today.uv >= 6) notes.push(`🧴 紫外線が強い（UV ${r1(today.uv)}）`);
   if (today.wind >= 30) notes.push(`💨 風が強い（最大 ${r0(today.wind / 3.6)}m/s）`);
 
