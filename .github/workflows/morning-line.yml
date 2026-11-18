@@ -3,6 +3,9 @@ name: 毎朝の天気をLINEに送る
 run-name: ${{ (github.event_name == 'workflow_dispatch' && inputs.test) && '【テスト】天気をLINEに送る' || '毎朝の天気をLINEに送る' }}
 
 on:
+  # 本番：Claude の定期実行（クラウド）が毎朝 7:00 にこのブランチへ空のコミットを送り、それをきっかけに起動する
+  push:
+    branches: ['claude/line-trigger']
   # 手動実行（Actions 画面の「Run workflow」や gh workflow run）
   workflow_dispatch:
     inputs:
@@ -10,7 +13,7 @@ on:
         description: テスト送信にする（「【テスト送信】」付きで、二重送信の判定もしない）
         type: boolean
         default: true # Actions 画面の「Run workflow」から押したときはテスト送信
-  # GitHub の定時実行は毎朝3〜4時間遅れて起動している（11/15・11/16 実績）。
+  # 予備：GitHub の定時実行は毎朝3〜8時間遅れて起動している（11/15〜11/17 実績）。
   # そのため深夜〜早朝に何度か起動を予約し、7:00 より前に起動した回は 7:00 まで待ってから送る。
   # 最初に送った1回以外は「送信済み」を見て止まる。（時刻は UTC。JST 2:10・3:10・4:10・5:10・6:40）
   schedule:
@@ -64,6 +67,8 @@ jobs:
           fi
       - uses: actions/checkout@v7
         if: steps.check.outputs.sent != 'true'
+        with:
+          ref: main # 合図用ブランチから起動されても、送る処理は常に最新の main を使う
       - uses: actions/setup-node@v7
         if: steps.check.outputs.sent != 'true'
         with:
